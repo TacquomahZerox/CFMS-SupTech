@@ -1,0 +1,285 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// NOTES: SQLite doesn't support enums or JSON
+// Using String types instead. Valid values:
+//
+// UserRole: SUPER_ADMIN, CFM_OFFICER, SUPERVISOR, BANK_USER, AUDITOR
+// ApprovalType: FOREX_PURCHASE, FOREX_SALE, OUTWARD_TRANSFER, INWARD_TRANSFER,
+//               LOAN_DISBURSEMENT, LOAN_REPAYMENT, DIVIDEND_PAYMENT, CAPITAL_REPATRIATION, OTHER
+// ApprovalStatus: PENDING, ACTIVE, EXPIRED, REVOKED, EXHAUSTED
+// TransactionType: (same as ApprovalType)
+// SubmissionStatus: PENDING, PROCESSING, COMPLETED, FAILED, PARTIALLY_COMPLETED
+// ExceptionSeverity: LOW, MEDIUM, HIGH, CRITICAL
+// ExceptionStatus: OPEN, UNDER_REVIEW, RESOLVED, WAIVED
+// RiskGrade: A, B, C, D
+// ============================================
+
+// ============================================
+// MODELS
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  role          String    @default("BANK_USER")
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  bankId             String?
+  bank               Bank?             @relation(fields: [bankId], references: [id])
+  approvalsCreated   Approval[]        @relation("ApprovalCreatedBy")
+  approvalsApproved  Approval[]        @relation("ApprovalApprovedBy")
+  submissions        Submission[]
+  exceptionsResolved Exception[]       @relation("ExceptionResolvedBy")
+  auditLogs          AuditLog[]
+  reports            Report[]
+
+  @@index([email])
+  @@index([role])
+  @@index([bankId])
+}
+
+model Bank {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  swiftCode     String?
+  address       String?
+  contactEmail  String?
+  contactPhone  String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  branches     Branch[]
+  users        User[]
+  approvals    Approval[]
+  transactions Transaction[]
+  submissions  Submission[]
+  exceptions   Exception[]
+  riskScores   RiskScore[]
+
+  @@index([code])
+  @@index([isActive])
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  code      String
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bankId       String
+  bank         Bank          @relation(fields: [bankId], references: [id])
+  transactions Transaction[]
+
+  @@unique([bankId, code])
+  @@index([bankId])
+}
+
+model Approval {
+  id              String   @id @default(cuid())
+  referenceNumber String   @unique
+  type            String
+  approvedAmount  Float
+  utilizedAmount  Float    @default(0)
+  currency        String   @default("USD")
+  status          String   @default("PENDING")
+  validityStart   DateTime
+  validityEnd     DateTime
+  beneficiaryName String?
+  beneficiaryAccount String?
+  purpose         String?
+  conditions      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  bankId       String
+  bank         Bank          @relation(fields: [bankId], references: [id])
+  createdById  String?
+  createdBy    User?         @relation("ApprovalCreatedBy", fields: [createdById], references: [id])
+  approvedById String?
+  approvedBy   User?         @relation("ApprovalApprovedBy", fields: [approvedById], references: [id])
+  transactions Transaction[]
+  exceptions   Exception[]
+
+  @@index([bankId])
+  @@index([status])
+  @@index([type])
+  @@index([validityStart, validityEnd])
+}
+
+model Transaction {
+  id                  String   @id @default(cuid())
+  referenceNumber     String   @unique
+  type                String
+  amount              Float
+  currency            String   @default("USD")
+  exchangeRate        Float?
+  transactionDate     DateTime
+  valueDate           DateTime
+  counterpartyName    String?
+  counterpartyCountry String?
+  purpose             String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  bankId     String
+  bank       Bank        @relation(fields: [bankId], references: [id])
+  branchId   String?
+  branch     Branch?     @relation(fields: [branchId], references: [id])
+  approvalId String?
+  approval   Approval?   @relation(fields: [approvalId], references: [id])
+  exceptions Exception[]
+
+  @@index([bankId])
+  @@index([approvalId])
+  @@index([transactionDate])
+  @@index([type])
+}
+
+model Submission {
+  id               String    @id @default(cuid())
+  referenceNumber  String    @unique
+  type             String
+  fileName         String
+  status           String    @default("PENDING")
+  totalRecords     Int       @default(0)
+  processedRecords Int       @default(0)
+  errorRecords     Int       @default(0)
+  errorDetails     String?
+  submittedAt      DateTime  @default(now())
+  processedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  bankId        String
+  bank          Bank   @relation(fields: [bankId], references: [id])
+  submittedById String
+  submittedBy   User   @relation(fields: [submittedById], references: [id])
+
+  @@index([bankId])
+  @@index([status])
+  @@index([submittedAt])
+}
+
+model Exception {
+  id          String    @id @default(cuid())
+  code        String
+  description String
+  severity    String
+  status      String    @default("OPEN")
+  resolution  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  bankId        String
+  bank          Bank         @relation(fields: [bankId], references: [id])
+  transactionId String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  approvalId    String?
+  approval      Approval?    @relation(fields: [approvalId], references: [id])
+  resolvedById  String?
+  resolvedBy    User?        @relation("ExceptionResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([bankId])
+  @@index([severity])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model RiskScore {
+  id                  String   @id @default(cuid())
+  score               Float
+  grade               String
+  mismatchRate        Float    @default(0)
+  unapprovedRate      Float    @default(0)
+  lateSubmissionRate  Float    @default(0)
+  dataQualityScore    Float    @default(1)
+  repeatViolationRate Float    @default(0)
+  calculatedAt        DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  // Relations
+  bankId String
+  bank   Bank   @relation(fields: [bankId], references: [id])
+
+  @@index([bankId])
+  @@index([calculatedAt])
+  @@index([grade])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  entityType String
+  entityId   String?
+  details    String?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  format      String   @default("PDF")
+  status      String   @default("GENERATING")
+  fileSize    Int      @default(0)
+  filePath    String?
+  parameters  String?
+  generatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  // Relations
+  generatedById String
+  generatedBy   User   @relation(fields: [generatedById], references: [id])
+
+  @@index([type])
+  @@index([generatedAt])
+}
+
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+}
