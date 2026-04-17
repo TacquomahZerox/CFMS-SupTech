@@ -3,7 +3,8 @@ import prisma from '@/lib/prisma';
 import { createApiHandler, successResponse, errorResponse } from '@/lib/api-utils';
 import { exceptionUpdateSchema } from '@/lib/validations';
 import { createAuditLog } from '@/services/audit.service';
-import { canAccessBank } from '@/lib/auth';
+import { canAccessInstitution, canResolveException } from '@/lib/policies';
+import { assertValidExceptionTransition } from '@/lib/workflows';
 
 // GET /api/exceptions/[id] - Get exception details
 export const GET = createApiHandler(
@@ -26,7 +27,7 @@ export const GET = createApiHandler(
       return errorResponse('Exception not found', 404);
     }
 
-    if (!canAccessBank(session.role, session.bankId, exception.bankId)) {
+    if (!canAccessInstitution(session, exception.bankId)) {
       return errorResponse('Access denied', 403);
     }
 
@@ -49,6 +50,12 @@ export const PUT = createApiHandler(
     if (!existing) {
       return errorResponse('Exception not found', 404);
     }
+
+    if (!canResolveException(session, existing.bankId)) {
+      return errorResponse('Access denied', 403);
+    }
+
+    assertValidExceptionTransition(existing.status, validated.status);
 
     const updateData: Record<string, unknown> = {
       status: validated.status,
@@ -73,7 +80,7 @@ export const PUT = createApiHandler(
 
     await createAuditLog({
       userId: session.userId,
-      action: 'UPDATE',
+      action: 'exception.state_changed',
       entityType: 'Exception',
       entityId: exception.id,
       details: { 
