@@ -3,7 +3,8 @@ import prisma from '@/lib/prisma';
 import { createApiHandler, successResponse, errorResponse } from '@/lib/api-utils';
 import { approvalUpdateSchema } from '@/lib/validations';
 import { createAuditLog } from '@/services/audit.service';
-import { canAccessBank } from '@/lib/auth';
+import { canViewSubmission, canAccessInstitution } from '@/lib/policies';
+import { assertValidApprovalTransition } from '@/lib/workflows';
 
 // GET /api/approvals/[id] - Get approval by ID
 export const GET = createApiHandler(
@@ -34,7 +35,7 @@ export const GET = createApiHandler(
       return errorResponse('Approval not found', 404);
     }
 
-    if (!canAccessBank(session.role, session.bankId, approval.bankId)) {
+    if (!canViewSubmission(session, approval.bankId)) {
       return errorResponse('Access denied', 403);
     }
 
@@ -58,6 +59,10 @@ export const PUT = createApiHandler(
       return errorResponse('Approval not found', 404);
     }
 
+    if (!canAccessInstitution(session, existing.bankId)) {
+      return errorResponse('Access denied', 403);
+    }
+
     const updateData: Record<string, unknown> = { ...validated };
     
     if (validated.approvedAmount !== undefined && validated.approvedAmount !== null) {
@@ -70,6 +75,10 @@ export const PUT = createApiHandler(
       updateData.validityEnd = new Date(validated.validityEnd);
     }
 
+    if (validated.status && validated.status !== existing.status) {
+      assertValidApprovalTransition(existing.status, validated.status);
+    }
+
     const approval = await prisma.approval.update({
       where: { id },
       data: updateData,
@@ -80,7 +89,7 @@ export const PUT = createApiHandler(
 
     await createAuditLog({
       userId: session.userId,
-      action: 'UPDATE',
+      action: validated.status ? 'approval.state_changed' : 'approval.updated',
       entityType: 'Approval',
       entityId: approval.id,
       details: { changes: validated },
@@ -104,6 +113,10 @@ export const DELETE = createApiHandler(
       return errorResponse('Approval not found', 404);
     }
 
+    if (!canAccessInstitution(session, existing.bankId)) {
+      return errorResponse('Access denied', 403);
+    }
+
     // Don't allow deletion if transactions are linked
     const linkedTransactions = await prisma.transaction.count({
       where: { approvalId: id },
@@ -113,7 +126,7 @@ export const DELETE = createApiHandler(
       // Cancel instead of delete
       await prisma.approval.update({
         where: { id },
-        data: { status: 'CANCELLED' },
+        data: { status: 'REVOKED' },
       });
     } else {
       await prisma.approval.delete({

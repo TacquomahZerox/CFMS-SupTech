@@ -2,7 +2,24 @@ import { NextRequest } from 'next/server';
 import prisma from '@/lib/prisma';
 import { createApiHandler, successResponse, errorResponse, paginatedResponse } from '@/lib/api-utils';
 import { canAccessBank } from '@/lib/auth';
+import { ValidationError } from '@/lib/errors';
 import { processTransactionUpload } from '@/services/upload.service';
+
+
+const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
+const ALLOWED_UPLOAD_EXTENSIONS = ['.csv'];
+
+function assertSafeUpload(file: File): void {
+  const lowerName = file.name.toLowerCase();
+  if (!ALLOWED_UPLOAD_EXTENSIONS.some((ext) => lowerName.endsWith(ext))) {
+    throw new ValidationError('Only CSV uploads are supported');
+  }
+
+  if (file.size <= 0 || file.size > MAX_UPLOAD_SIZE_BYTES) {
+    throw new ValidationError('File size must be between 1 byte and 10 MB');
+  }
+}
+
 
 // GET /api/submissions - List submissions
 export const GET = createApiHandler(
@@ -60,6 +77,8 @@ export const POST = createApiHandler(
     if (!file) {
       return errorResponse('No file provided', 400);
     }
+
+    assertSafeUpload(file);
 
     // Check bank access
     const targetBankId = session.role === 'BANK_USER' ? session.bankId : bankId;
