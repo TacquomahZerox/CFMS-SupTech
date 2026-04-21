@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { AuthSession } from '@/lib/auth';
 import { USER_ROLES } from '@/lib/constants';
 import { canAccessInstitution, canResolveException } from '@/lib/policies';
 
-const bankSession = {
+const bankSession: AuthSession = {
   userId: 'u1',
   email: 'bank@example.com',
   role: USER_ROLES.BANK_USER,
@@ -12,13 +13,13 @@ const bankSession = {
   lastName: 'User',
   tokenVersion: 1,
   permissions: [],
-} as const;
+};
 
-const supervisorSession = {
+const supervisorSession: AuthSession = {
   ...bankSession,
   role: USER_ROLES.SUPERVISOR,
   bankId: null,
-} as const;
+};
 
 test('enforces institution scope for bank users', () => {
   assert.equal(canAccessInstitution(bankSession, 'bank-1'), true);

@@ -11,6 +11,13 @@ import {
 } from '@/lib/constants';
 import { listPermissions } from '@/lib/permissions';
 
+const CROSS_BANK_ROLES: ReadonlySet<UserRole> = new Set<UserRole>([
+  USER_ROLES.SUPER_ADMIN,
+  USER_ROLES.CFM_OFFICER,
+  USER_ROLES.SUPERVISOR,
+  USER_ROLES.AUDITOR,
+]);
+
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this'
 );
@@ -131,14 +138,7 @@ export function canAccessBank(
   userBankId: string | null,
   targetBankId: string
 ): boolean {
-  if (
-    [
-      USER_ROLES.SUPER_ADMIN,
-      USER_ROLES.CFM_OFFICER,
-      USER_ROLES.SUPERVISOR,
-      USER_ROLES.AUDITOR,
-    ].includes(role)
-  ) {
+  if (CROSS_BANK_ROLES.has(role)) {
     return true;
   }
   return userBankId === targetBankId;

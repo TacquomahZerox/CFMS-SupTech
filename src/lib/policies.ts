@@ -1,8 +1,8 @@
 import type { AuthSession } from '@/lib/auth';
-import { USER_ROLES } from '@/lib/constants';
+import { USER_ROLES, type UserRole } from '@/lib/constants';
 import { PERMISSIONS, hasPermission } from '@/lib/permissions';
 
-const REGULATOR_ROLES = new Set([
+const REGULATOR_ROLES: ReadonlySet<UserRole> = new Set<UserRole>([
   USER_ROLES.SUPER_ADMIN,
   USER_ROLES.CFM_OFFICER,
   USER_ROLES.SUPERVISOR,
