@@ -65,14 +65,36 @@ const APPROVAL_REQUIRED_TYPES = [
 ];
 
 export async function runReconciliation(
-  bankId: string,
+  submissionId: string,
   userId: string
 ): Promise<ReconciliationResult> {
-  // Get all unreconciled transactions for the bank
+  const submission = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    select: { id: true, bankId: true },
+  });
+
+  if (!submission) {
+    throw new Error(`Submission not found: ${submissionId}`);
+  }
+
+  return reconcileTransactions({
+    bankId: submission.bankId,
+    submissionId: submission.id,
+    userId,
+  });
+}
+
+async function reconcileTransactions(params: {
+  bankId: string;
+  userId: string;
+  submissionId?: string;
+}): Promise<ReconciliationResult> {
+  const { bankId, submissionId, userId } = params;
+
   const transactions = await prisma.transaction.findMany({
     where: {
       bankId,
-      approvalId: null,
+      ...(submissionId ? { submissionId } : {}),
     },
     include: {
       approval: true,
@@ -90,6 +112,15 @@ export async function runReconciliation(
     } else {
       exceptions.push(...transactionExceptions);
     }
+  }
+
+  if (transactions.length > 0) {
+    await prisma.exception.deleteMany({
+      where: {
+        transactionId: { in: transactions.map((transaction) => transaction.id) },
+        status: { in: [ExceptionStatus.OPEN, ExceptionStatus.UNDER_REVIEW] },
+      },
+    });
   }
 
   // Create exceptions in database
@@ -121,7 +152,7 @@ export async function runReconciliation(
   });
 
   return {
-    submissionId: '',
+    submissionId: submissionId || '',
     bankId,
     totalTransactions: transactions.length,
     matchedTransactions: matchedCount,
@@ -402,7 +433,7 @@ export async function runBatchReconciliation(
   bankId: string,
   userId: string
 ): Promise<ReconciliationResult[]> {
-  const result = await runReconciliation(bankId, userId);
+  const result = await reconcileTransactions({ bankId, userId });
   return [result];
 }
 

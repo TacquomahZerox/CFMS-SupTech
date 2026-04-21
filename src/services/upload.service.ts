@@ -44,8 +44,10 @@ interface ParsedTransaction {
   transactionDate: string;
   valueDate?: string;
   counterpartyName?: string;
+  counterpartyAccount?: string;
   counterpartyCountry?: string;
   purpose?: string;
+  documentReference?: string;
   branchCode?: string;
   approvalReference?: string;
 }
@@ -58,7 +60,7 @@ interface ParsedApproval {
   validityStart: string;
   validityEnd: string;
   beneficiaryName: string;
-  bankCode: string;
+  bankCode?: string;
   conditions?: string;
   purpose?: string;
 }
@@ -70,6 +72,19 @@ interface UploadResult {
   invalidRecords: number;
   errors: { row: number; errors: string[] }[];
   submissionId?: string;
+}
+
+const SubmissionType = {
+  TRANSACTIONS: 'TRANSACTIONS',
+  APPROVALS: 'APPROVALS',
+} as const;
+
+function buildSubmissionReference(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function normalizeKey(value?: string | null): string {
+  return (value || '').trim().toUpperCase();
 }
 
 export async function parseCSV<T>(
@@ -119,9 +134,9 @@ export async function processTransactionUpload(
   // Create submission record
   const submission = await prisma.submission.create({
     data: {
-      referenceNumber: `SUB-${Date.now()}`,
+      referenceNumber: buildSubmissionReference('SUB-TXN'),
       fileName,
-      type: 'TRANSACTION',
+      type: SubmissionType.TRANSACTIONS,
       bankId,
       submittedById: userId,
       totalRecords: parsedData.length,
@@ -138,11 +153,14 @@ export async function processTransactionUpload(
     transactionDate: Date;
     valueDate: Date;
     counterpartyName?: string;
+    counterpartyAccount?: string;
     counterpartyCountry?: string;
     purpose?: string;
+    documentReference?: string;
     bankId: string;
     branchId?: string;
     approvalId?: string;
+    submissionId: string;
   }[] = [];
   const errors: { row: number; errors: string[] }[] = [];
 
@@ -151,7 +169,7 @@ export async function processTransactionUpload(
     where: { bankId },
     select: { id: true, code: true },
   });
-  const branchMap = new Map(branches.map(b => [b.code, b.id]));
+  const branchMap = new Map(branches.map((b) => [normalizeKey(b.code), b.id]));
 
   // Map approval references to IDs
   const approvalRefs = parsedData
@@ -164,19 +182,51 @@ export async function processTransactionUpload(
     },
     select: { id: true, referenceNumber: true },
   });
-  const approvalMap = new Map(approvals.map(a => [a.referenceNumber, a.id]));
+  const approvalMap = new Map(approvals.map((a) => [normalizeKey(a.referenceNumber), a.id]));
+
+  const referenceNumbers = parsedData
+    .map((row) => row.referenceNumber)
+    .filter((value): value is string => Boolean(value));
+  const existingTransactions = await prisma.transaction.findMany({
+    where: {
+      bankId,
+      referenceNumber: { in: referenceNumbers },
+    },
+    select: { referenceNumber: true },
+  });
+  const existingReferenceSet = new Set(
+    existingTransactions.map((row) => normalizeKey(row.referenceNumber))
+  );
+  const seenReferenceSet = new Set<string>();
 
   // Process each record
   for (let i = 0; i < parsedData.length; i++) {
     const row = parsedData[i];
     const rowErrors: string[] = [];
+    const amount = Number(row.amount);
+    const exchangeRate =
+      row.exchangeRate !== undefined && row.exchangeRate !== null
+        ? Number(row.exchangeRate)
+        : undefined;
 
     // Validate required fields
     if (!row.referenceNumber) rowErrors.push('Missing reference number');
     if (!row.type) rowErrors.push('Missing transaction type');
-    if (!row.amount || isNaN(row.amount)) rowErrors.push('Invalid amount');
+    if (!Number.isFinite(amount) || amount <= 0) rowErrors.push('Invalid amount');
     if (!row.currency || row.currency.length !== 3) rowErrors.push('Invalid currency');
     if (!row.transactionDate) rowErrors.push('Missing transaction date');
+    if (exchangeRate !== undefined && (!Number.isFinite(exchangeRate) || exchangeRate <= 0)) {
+      rowErrors.push('Invalid exchange rate');
+    }
+
+    const normalizedReference = normalizeKey(row.referenceNumber);
+    if (normalizedReference) {
+      if (existingReferenceSet.has(normalizedReference)) {
+        rowErrors.push(`Duplicate transaction reference number: ${row.referenceNumber}`);
+      } else if (seenReferenceSet.has(normalizedReference)) {
+        rowErrors.push(`Duplicate reference number within upload: ${row.referenceNumber}`);
+      }
+    }
 
     // Validate transaction type
     const txType = mapTransactionType(row.type);
@@ -191,20 +241,25 @@ export async function processTransactionUpload(
       continue;
     }
 
+    seenReferenceSet.add(normalizedReference);
+
     validRecords.push({
       referenceNumber: row.referenceNumber,
       type: txType!,
-      amount: row.amount,
+      amount,
       currency: row.currency.toUpperCase(),
-      exchangeRate: row.exchangeRate ? row.exchangeRate : undefined,
+      exchangeRate,
       transactionDate: txDate,
       valueDate: row.valueDate ? new Date(row.valueDate) : txDate,
       counterpartyName: row.counterpartyName,
+      counterpartyAccount: row.counterpartyAccount,
       counterpartyCountry: row.counterpartyCountry,
       purpose: row.purpose,
+      documentReference: row.documentReference,
       bankId,
-      branchId: row.branchCode ? branchMap.get(row.branchCode) : undefined,
-      approvalId: row.approvalReference ? approvalMap.get(row.approvalReference) : undefined,
+      branchId: row.branchCode ? branchMap.get(normalizeKey(row.branchCode)) : undefined,
+      approvalId: row.approvalReference ? approvalMap.get(normalizeKey(row.approvalReference)) : undefined,
+      submissionId: submission.id,
     });
   }
 
@@ -221,7 +276,12 @@ export async function processTransactionUpload(
     data: {
       processedRecords: validRecords.length,
       errorRecords: errors.length,
-      status: errors.length > 0 ? SubmissionStatus.PARTIALLY_COMPLETED : SubmissionStatus.COMPLETED,
+      status:
+        validRecords.length === 0
+          ? SubmissionStatus.FAILED
+          : errors.length > 0
+            ? SubmissionStatus.PARTIALLY_COMPLETED
+            : SubmissionStatus.COMPLETED,
       errorDetails: errors.length > 0 ? JSON.stringify(errors) : null,
       processedAt: new Date(),
     },
@@ -242,7 +302,7 @@ export async function processTransactionUpload(
   });
 
   return {
-    success: true,
+    success: validRecords.length > 0,
     totalRecords: parsedData.length,
     validRecords: validRecords.length,
     invalidRecords: errors.length,
@@ -253,7 +313,9 @@ export async function processTransactionUpload(
 
 export async function processApprovalUpload(
   fileContent: string,
-  userId: string
+  bankId: string,
+  userId: string,
+  fileName: string
 ): Promise<UploadResult> {
   const { data: parsedData, errors: parseErrors } = await parseCSV<ParsedApproval>(fileContent);
   
@@ -267,13 +329,32 @@ export async function processApprovalUpload(
     };
   }
 
-  // Map bank codes to IDs
-  const bankCodes = Array.from(new Set(parsedData.map(r => r.bankCode)));
-  const banks = await prisma.bank.findMany({
-    where: { code: { in: bankCodes } },
+  const bank = await prisma.bank.findUnique({
+    where: { id: bankId },
     select: { id: true, code: true },
   });
-  const bankMap = new Map(banks.map(b => [b.code, b.id]));
+
+  if (!bank) {
+    return {
+      success: false,
+      totalRecords: parsedData.length,
+      validRecords: 0,
+      invalidRecords: parsedData.length,
+      errors: [{ row: 1, errors: ['Target bank not found'] }],
+    };
+  }
+
+  const submission = await prisma.submission.create({
+    data: {
+      referenceNumber: buildSubmissionReference('SUB-APR'),
+      fileName,
+      type: SubmissionType.APPROVALS,
+      bankId,
+      submittedById: userId,
+      totalRecords: parsedData.length,
+      status: SubmissionStatus.PROCESSING,
+    },
+  });
 
   const validRecords: {
     referenceNumber: string;
@@ -289,23 +370,47 @@ export async function processApprovalUpload(
     createdById: string;
   }[] = [];
   const errors: { row: number; errors: string[] }[] = [];
+  const seenReferenceSet = new Set<string>();
+  const existingApprovals = await prisma.approval.findMany({
+    where: {
+      bankId,
+      referenceNumber: {
+        in: parsedData
+          .map((row) => row.referenceNumber)
+          .filter((value): value is string => Boolean(value)),
+      },
+    },
+    select: { referenceNumber: true },
+  });
+  const existingReferenceSet = new Set(
+    existingApprovals.map((row) => normalizeKey(row.referenceNumber))
+  );
 
   for (let i = 0; i < parsedData.length; i++) {
     const row = parsedData[i];
     const rowErrors: string[] = [];
+    const approvedAmount = Number(row.approvedAmount);
 
     // Validate required fields
     if (!row.referenceNumber) rowErrors.push('Missing reference number');
     if (!row.type) rowErrors.push('Missing approval type');
-    if (!row.approvedAmount || isNaN(row.approvedAmount)) rowErrors.push('Invalid amount');
+    if (!Number.isFinite(approvedAmount) || approvedAmount <= 0) rowErrors.push('Invalid amount');
     if (!row.currency || row.currency.length !== 3) rowErrors.push('Invalid currency');
     if (!row.validityStart) rowErrors.push('Missing validity start');
     if (!row.validityEnd) rowErrors.push('Missing validity end');
-    if (!row.bankCode) rowErrors.push('Missing bank code');
 
-    // Validate bank exists
-    const bankId = bankMap.get(row.bankCode);
-    if (!bankId) rowErrors.push(`Bank not found: ${row.bankCode}`);
+    if (row.bankCode && normalizeKey(row.bankCode) !== normalizeKey(bank.code)) {
+      rowErrors.push(`Row bank code ${row.bankCode} does not match selected bank ${bank.code}`);
+    }
+
+    const normalizedReference = normalizeKey(row.referenceNumber);
+    if (normalizedReference) {
+      if (existingReferenceSet.has(normalizedReference)) {
+        rowErrors.push(`Duplicate approval reference number: ${row.referenceNumber}`);
+      } else if (seenReferenceSet.has(normalizedReference)) {
+        rowErrors.push(`Duplicate reference number within upload: ${row.referenceNumber}`);
+      }
+    }
 
     // Validate approval type
     const approvalType = mapApprovalType(row.type);
@@ -323,17 +428,19 @@ export async function processApprovalUpload(
       continue;
     }
 
+    seenReferenceSet.add(normalizedReference);
+
     validRecords.push({
       referenceNumber: row.referenceNumber,
       type: approvalType!,
-      approvedAmount: row.approvedAmount,
+      approvedAmount,
       currency: row.currency.toUpperCase(),
       validityStart: startDate,
       validityEnd: endDate,
       beneficiaryName: row.beneficiaryName,
       conditions: row.conditions,
       purpose: row.purpose,
-      bankId: bankId!,
+      bankId,
       createdById: userId,
     });
   }
@@ -351,12 +458,30 @@ export async function processApprovalUpload(
     }
   }
 
+  await prisma.submission.update({
+    where: { id: submission.id },
+    data: {
+      processedRecords: validRecords.length,
+      errorRecords: errors.length,
+      status:
+        validRecords.length === 0
+          ? SubmissionStatus.FAILED
+          : errors.length > 0
+            ? SubmissionStatus.PARTIALLY_COMPLETED
+            : SubmissionStatus.COMPLETED,
+      errorDetails: errors.length > 0 ? JSON.stringify(errors) : null,
+      processedAt: new Date(),
+    },
+  });
+
   // Create audit log
   await createAuditLog({
     userId,
     action: 'UPLOAD',
     entityType: 'Approval',
+    entityId: submission.id,
     details: {
+      fileName,
       totalRecords: parsedData.length,
       validRecords: validRecords.length,
       invalidRecords: errors.length,
@@ -364,11 +489,12 @@ export async function processApprovalUpload(
   });
 
   return {
-    success: true,
+    success: validRecords.length > 0,
     totalRecords: parsedData.length,
     validRecords: validRecords.length,
     invalidRecords: errors.length,
     errors,
+    submissionId: submission.id,
   };
 }
 

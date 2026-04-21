@@ -47,6 +47,8 @@ export default function NewSubmissionPage() {
   const [selectedBankId, setSelectedBankId] = useState<string>('');
 
   const isBankUser = user?.role === 'BANK_USER';
+  const canUploadTransactions = user?.role === 'BANK_USER' || user?.role === 'SUPER_ADMIN';
+  const canUploadApprovals = user?.role === 'CFM_OFFICER' || user?.role === 'SUPER_ADMIN';
 
   useEffect(() => {
     // Non-bank users need to pick a bank
@@ -61,6 +63,12 @@ export default function NewSubmissionPage() {
         .catch(console.error);
     }
   }, [isBankUser]);
+
+  useEffect(() => {
+    if (uploadType === 'APPROVALS' && !canUploadApprovals) {
+      setUploadType('TRANSACTIONS');
+    }
+  }, [canUploadApprovals, uploadType]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
@@ -169,16 +177,20 @@ export default function NewSubmissionPage() {
               {/* Submission Type */}
               <div className="space-y-2">
                 <Label htmlFor="uploadType">Submission Type</Label>
-                <Select value={uploadType} onValueChange={setUploadType}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="TRANSACTIONS">Transaction Data</SelectItem>
-                    <SelectItem value="APPROVALS">Approval Data</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                  <Select value={uploadType} onValueChange={setUploadType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {canUploadTransactions && (
+                        <SelectItem value="TRANSACTIONS">Transaction Data</SelectItem>
+                      )}
+                      {canUploadApprovals && (
+                        <SelectItem value="APPROVALS">Approval Data</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
 
               {/* File Upload Area */}
               <div className="space-y-2">
@@ -188,7 +200,7 @@ export default function NewSubmissionPage() {
                   <input
                     type="file"
                     id="file-upload"
-                    accept=".csv,.xlsx"
+                    accept=".csv"
                     onChange={handleFileSelect}
                     className="hidden"
                   />
@@ -199,7 +211,7 @@ export default function NewSubmissionPage() {
                     Click to select a file
                   </label>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Supports CSV and XLSX files
+                    Supports CSV files
                   </p>
                   {selectedFile && (
                     <div className="mt-4 flex items-center justify-center gap-2 text-sm">
@@ -365,11 +377,19 @@ export default function NewSubmissionPage() {
                     </li>
                     <li className="flex items-center gap-1">
                       <Badge variant="outline" className="text-[10px] px-1">Optional</Badge>
+                      counterpartyAccount
+                    </li>
+                    <li className="flex items-center gap-1">
+                      <Badge variant="outline" className="text-[10px] px-1">Optional</Badge>
                       counterpartyCountry
                     </li>
                     <li className="flex items-center gap-1">
                       <Badge variant="outline" className="text-[10px] px-1">Optional</Badge>
                       purpose
+                    </li>
+                    <li className="flex items-center gap-1">
+                      <Badge variant="outline" className="text-[10px] px-1">Optional</Badge>
+                      documentReference
                     </li>
                   </ul>
                 </div>

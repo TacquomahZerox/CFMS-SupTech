@@ -21,7 +21,10 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (
+    email: string,
+    password: string
+  ) => Promise<{ success: boolean; error?: string; user?: User }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -38,7 +41,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = async () => {
     try {
-      const response = await fetch('/api/auth/me');
+      const response = await fetch('/api/auth/me', {
+        cache: 'no-store',
+      });
       const data = await response.json();
 
       if (data.authenticated && data.user) {
@@ -55,18 +60,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    refreshUser();
+    void refreshUser();
   }, []);
 
   useEffect(() => {
-    if (!isLoading) {
-      const isPublicPath = PUBLIC_PATHS.includes(pathname);
+    if (isLoading) {
+      return;
+    }
 
-      if (!user && !isPublicPath) {
-        router.push('/login');
-      } else if (user && isPublicPath) {
-        router.push('/dashboard');
-      }
+    const isPublicPath = PUBLIC_PATHS.includes(pathname);
+
+    if (!user && !isPublicPath) {
+      const redirect = pathname && pathname !== '/' ? `?redirect=${encodeURIComponent(pathname)}` : '';
+      router.replace(`/login${redirect}`);
     }
   }, [user, isLoading, pathname, router]);
 
@@ -80,12 +86,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const data = await response.json();
 
-      if (data.success && data.user) {
-        setUser(data.user);
-        return { success: true };
+      if (response.ok && data.success && data.data) {
+        setUser(data.data);
+        return { success: true, user: data.data };
       }
 
-      return { success: false, error: data.error || 'Login failed' };
+      return {
+        success: false,
+        error: data.error?.message || data.error || 'Login failed',
+      };
     } catch (error) {
       console.error('Login error:', error);
       return { success: false, error: 'An unexpected error occurred' };
@@ -96,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
       setUser(null);
-      router.push('/login');
+      router.replace('/login');
     } catch (error) {
       console.error('Logout error:', error);
     }

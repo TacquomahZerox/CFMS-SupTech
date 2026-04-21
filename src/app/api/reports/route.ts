@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createApiHandler, successResponse, errorResponse } from '@/lib/api-utils';
 import prisma from '@/lib/prisma';
 import { 
@@ -30,7 +30,7 @@ function resolveReportType(rawType?: string) {
 export const GET = createApiHandler(
   async (_request, { session }) => {
     const reports = await prisma.report.findMany({
-      where: {},
+      where: session.role === 'BANK_USER' ? { generatedById: session.userId } : {},
       include: {
         generatedBy: { select: { firstName: true, lastName: true } },
       },
@@ -61,8 +61,9 @@ export const POST = createApiHandler(
   async (request, { session }) => {
     const body = await request.json();
     const rawType = body.type as string | undefined;
-    const format = (body.format as string | undefined) || 'json';
-    const bankId = (body.bankId as string | undefined) || undefined;
+    const format = ((body.format as string | undefined) || 'JSON').toUpperCase();
+    const requestedBankId = (body.bankId as string | undefined) || undefined;
+    const bankId = session.role === 'BANK_USER' ? session.bankId || undefined : requestedBankId;
     const startDate = body.dateFrom || body.startDate;
     const endDate = body.dateTo || body.endDate;
 
@@ -83,6 +84,10 @@ export const POST = createApiHandler(
         break;
       }
       case 'exceptions': {
+        if (requestedBankId && !canAccessBank(session.role, session.bankId, requestedBankId)) {
+          return errorResponse('Access denied', 403);
+        }
+
         report = await generateExceptionReport(
           bankId,
           startDate ? new Date(startDate) : undefined,
@@ -91,6 +96,10 @@ export const POST = createApiHandler(
         break;
       }
       case 'approval-utilization': {
+        if (requestedBankId && !canAccessBank(session.role, session.bankId, requestedBankId)) {
+          return errorResponse('Access denied', 403);
+        }
+
         report = await getApprovalUtilizationReport(bankId);
         break;
       }
@@ -100,9 +109,22 @@ export const POST = createApiHandler(
 
     // Persist report metadata
     const serializedParams = JSON.stringify(body || {});
-    const payloadSize = format === 'csv'
-      ? 0 // csv size handled below if requested
-      : Buffer.byteLength(JSON.stringify(report), 'utf8');
+    const reportData = (report as { data: unknown }).data;
+    const exportRows =
+      format === 'CSV' && Array.isArray(reportData)
+        ? reportData.filter(
+            (row): row is Record<string, unknown> =>
+              typeof row === 'object' && row !== null && !Array.isArray(row)
+          )
+        : null;
+    const exportPayload =
+      exportRows
+        ? await exportToCSV(
+            exportRows,
+            Object.keys(exportRows[0] || {})
+          )
+        : null;
+    const payloadSize = Buffer.byteLength(exportPayload ?? JSON.stringify(report), 'utf8');
 
     const saved = await prisma.report.create({
       data: {
@@ -126,21 +148,14 @@ export const POST = createApiHandler(
       },
     });
 
-    // If CSV requested and data is array, stream as CSV
-    if (format.toLowerCase() === 'csv' && Array.isArray((report as any).data)) {
-      const csv = await exportToCSV(
-        (report as any).data as Record<string, unknown>[],
-        Object.keys(((report as any).data[0] as Record<string, unknown>) || {})
-      );
-      return new NextResponse(csv, {
-        headers: {
-          'Content-Type': 'text/csv',
-          'Content-Disposition': `attachment; filename="${type}-report.csv"`,
-        },
-      });
-    }
-
-    return successResponse({ report, saved });
+    return successResponse({
+      report,
+      saved,
+      exportPreview:
+        exportPayload && format === 'CSV'
+          ? exportPayload.split('\n').slice(0, 5).join('\n')
+          : null,
+    });
   },
-  { requiredPermission: 'reports:read' }
+  { requiredPermission: 'reports:export' }
 );

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { clearSessionCookie, getSessionFromRequest } from '@/lib/auth';
 import { createAuditLog } from '@/services/audit.service';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getSessionFromRequest(request);

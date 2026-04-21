@@ -98,6 +98,7 @@ const getStatusVariant = (status: string) => {
 export default function SubmissionsPage() {
   const { user } = useAuth();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [banks, setBanks] = useState<Array<{ id: string; code: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('__all__');
@@ -106,6 +107,11 @@ export default function SubmissionsPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadType, setUploadType] = useState<string>('TRANSACTIONS');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedBankId, setSelectedBankId] = useState('');
+  const canUploadTransactions = user?.role === 'BANK_USER' || user?.role === 'SUPER_ADMIN';
+  const canUploadApprovals = user?.role === 'CFM_OFFICER' || user?.role === 'SUPER_ADMIN';
+  const canUpload = canUploadTransactions || canUploadApprovals;
+  const isBankUser = user?.role === 'BANK_USER';
 
   const fetchSubmissions = async () => {
     setIsLoading(true);
@@ -131,6 +137,21 @@ export default function SubmissionsPage() {
     fetchSubmissions();
   }, [searchQuery, statusFilter, typeFilter]);
 
+  useEffect(() => {
+    if (!isBankUser) {
+      fetch('/api/banks')
+        .then((response) => response.json())
+        .then((result) => {
+          if (result.success && Array.isArray(result.data)) {
+            setBanks(result.data);
+          }
+        })
+        .catch((error) => {
+          console.error('Failed to fetch banks:', error);
+        });
+    }
+  }, [isBankUser]);
+
   const handleFileUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFile) return;
@@ -140,6 +161,9 @@ export default function SubmissionsPage() {
       const formData = new FormData();
       formData.append('file', selectedFile);
       formData.append('type', uploadType);
+      if (!isBankUser && selectedBankId) {
+        formData.append('bankId', selectedBankId);
+      }
 
       const response = await fetch('/api/submissions', {
         method: 'POST',
@@ -150,6 +174,7 @@ export default function SubmissionsPage() {
       if (result.success) {
         setIsDialogOpen(false);
         setSelectedFile(null);
+        setSelectedBankId('');
         fetchSubmissions();
       }
     } catch (error) {
@@ -159,7 +184,11 @@ export default function SubmissionsPage() {
     }
   };
 
-  const canUpload = user?.role === 'BANK_USER' || user?.role === 'SUPER_ADMIN';
+  useEffect(() => {
+    if (uploadType === 'APPROVALS' && !canUploadApprovals) {
+      setUploadType('TRANSACTIONS');
+    }
+  }, [canUploadApprovals, uploadType]);
 
   const stats = {
     total: submissions.length,
@@ -196,6 +225,23 @@ export default function SubmissionsPage() {
                   <DialogTitle>Upload Data File</DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleFileUpload} className="space-y-4">
+                  {!isBankUser && (
+                    <div className="space-y-2">
+                      <Label htmlFor="bankId">Bank</Label>
+                      <Select value={selectedBankId} onValueChange={setSelectedBankId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select bank" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {banks.map((bank) => (
+                            <SelectItem key={bank.id} value={bank.id}>
+                              {bank.code} - {bank.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="uploadType">Submission Type</Label>
                     <Select value={uploadType} onValueChange={setUploadType}>
@@ -203,8 +249,12 @@ export default function SubmissionsPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="TRANSACTIONS">Transactions</SelectItem>
-                        <SelectItem value="APPROVALS">Approvals</SelectItem>
+                        {canUploadTransactions && (
+                          <SelectItem value="TRANSACTIONS">Transactions</SelectItem>
+                        )}
+                        {canUploadApprovals && (
+                          <SelectItem value="APPROVALS">Approvals</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -215,7 +265,7 @@ export default function SubmissionsPage() {
                       <input
                         type="file"
                         id="file"
-                        accept=".csv,.xlsx"
+                        accept=".csv"
                         onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                         className="hidden"
                       />
@@ -233,16 +283,25 @@ export default function SubmissionsPage() {
                     </div>
                   </div>
                   <div className="bg-muted p-3 rounded-lg text-sm">
-                    <p className="font-medium mb-1">Required columns for transactions:</p>
+                    <p className="font-medium mb-1">
+                      {uploadType === 'APPROVALS'
+                        ? 'Required columns for approvals:'
+                        : 'Required columns for transactions:'}
+                    </p>
                     <code className="text-xs">
-                      referenceNumber, type, amount, currency, transactionDate, counterpartyName, counterpartyCountry
+                      {uploadType === 'APPROVALS'
+                        ? 'referenceNumber, type, approvedAmount, currency, validityStart, validityEnd, beneficiaryName'
+                        : 'referenceNumber, type, amount, currency, transactionDate, counterpartyName, counterpartyCountry'}
                     </code>
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={isUploading || !selectedFile}>
+                    <Button
+                      type="submit"
+                      disabled={isUploading || !selectedFile || (!isBankUser && !selectedBankId)}
+                    >
                       {isUploading ? 'Uploading...' : 'Upload'}
                     </Button>
                   </div>

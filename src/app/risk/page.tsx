@@ -82,13 +82,11 @@ export default function RiskAnalysisPage() {
   const fetchRiskScores = async () => {
     setIsLoading(true);
     try {
-      // Fetch risk scores from dashboard API
-      const response = await fetch('/api/dashboard/supervisor');
+      const response = await fetch('/api/risk/score?view=ranking');
       const result = await response.json();
-      if (result.success && result.data.topRiskBanks) {
-        // Transform the data to match our interface
-        const scores = result.data.topRiskBanks.map((bank: any) => ({
-          id: bank.id,
+      if (result.success && Array.isArray(result.data)) {
+        const scores = result.data.map((bank: any) => ({
+          id: bank.bankId,
           score: bank.score,
           grade: bank.grade,
           mismatchRate: 0,
@@ -96,11 +94,11 @@ export default function RiskAnalysisPage() {
           lateSubmissionRate: 0,
           dataQualityScore: 0,
           repeatViolationRate: 0,
-          calculatedAt: new Date().toISOString(),
+          calculatedAt: bank.scoringDate,
           bank: {
-            id: bank.id,
-            code: bank.code,
-            name: bank.name,
+            id: bank.bankId,
+            code: bank.bankCode,
+            name: bank.bankName,
             isActive: true,
           },
         }));
@@ -133,7 +131,7 @@ export default function RiskAnalysisPage() {
   const runRiskScoring = async () => {
     setIsRunning(true);
     try {
-      const body = selectedBank ? { bankId: selectedBank } : { all: true };
+      const body = selectedBank && selectedBank !== '__all__' ? { bankId: selectedBank } : { all: true };
       await fetch('/api/risk/score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,6 +146,7 @@ export default function RiskAnalysisPage() {
   };
 
   const filteredScores = riskScores.filter((score) => {
+    if (selectedBank !== '__all__' && score.bank.id !== selectedBank) return false;
     if (gradeFilter && gradeFilter !== '__all__' && score.grade !== gradeFilter) return false;
     return true;
   });

@@ -1,19 +1,40 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Shield, Loader2 } from 'lucide-react';
 
+function getSafeRedirect(rawRedirect: string | null): string {
+  if (!rawRedirect || !rawRedirect.startsWith('/')) {
+    return '/dashboard';
+  }
+
+  if (rawRedirect.startsWith('//')) {
+    return '/dashboard';
+  }
+
+  return rawRedirect;
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, user, isLoading: isAuthLoading } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (!isAuthLoading && user) {
+      router.replace(getSafeRedirect(searchParams.get('redirect')));
+    }
+  }, [isAuthLoading, router, searchParams, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,7 +43,9 @@ export default function LoginPage() {
 
     const result = await login(email, password);
 
-    if (!result.success) {
+    if (result.success) {
+      router.replace(getSafeRedirect(searchParams.get('redirect')));
+    } else {
       setError(result.error || 'Login failed');
     }
 
@@ -57,7 +80,7 @@ export default function LoginPage() {
                 type="email"
                 placeholder="Enter your email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => setEmail(e.target.value.trim().toLowerCase())}
                 required
                 disabled={isLoading}
               />

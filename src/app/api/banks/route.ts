@@ -17,9 +17,10 @@ export const GET = createApiHandler(
 
     if (search) {
       where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { code: { contains: search, mode: 'insensitive' } },
-        { shortName: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search } },
+        { code: { contains: search } },
+        { swiftCode: { contains: search } },
+        { contactEmail: { contains: search } },
       ];
     }
 

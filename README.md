@@ -140,11 +140,11 @@ After seeding the database:
 
 | Role | Email | Password |
 |------|-------|----------|
-| Super Admin | admin@centralbank.gov | password123 |
-| CFM Officer | cfm.officer@centralbank.gov | password123 |
-| Supervisor | supervisor@centralbank.gov | password123 |
-| Auditor | auditor@centralbank.gov | password123 |
-| Bank User | user@abc.com | password123 |
+| Super Admin | admin@rbz.co.zw | password123 |
+| CFM Officer | cfm.officer@rbz.co.zw | password123 |
+| Supervisor | supervisor@rbz.co.zw | password123 |
+| Auditor | auditor@rbz.co.zw | password123 |
+| Bank User | compliance.cbz@cfms.local | password123 |
 
 ## 📁 Project Structure
 

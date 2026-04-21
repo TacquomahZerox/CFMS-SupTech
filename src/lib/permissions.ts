@@ -72,6 +72,7 @@ const rolePermissions: Record<UserRole, PermissionSet> = {
     `${PERMISSIONS.SUBMISSIONS_WRITE}:own`,
     `${PERMISSIONS.EXCEPTIONS_READ}:own`,
     `${PERMISSIONS.REPORTS_READ}:own`,
+    `${PERMISSIONS.REPORTS_EXPORT}:own`,
     `${PERMISSIONS.RISK_READ}:own`,
   ]),
   [USER_ROLES.AUDITOR]: new Set([

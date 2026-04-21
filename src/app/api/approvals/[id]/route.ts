@@ -3,7 +3,7 @@ import prisma from '@/lib/prisma';
 import { createApiHandler, successResponse, errorResponse } from '@/lib/api-utils';
 import { approvalUpdateSchema } from '@/lib/validations';
 import { createAuditLog } from '@/services/audit.service';
-import { canViewSubmission, canAccessInstitution } from '@/lib/policies';
+import { canAccessInstitution } from '@/lib/policies';
 import { assertValidApprovalTransition } from '@/lib/workflows';
 
 // GET /api/approvals/[id] - Get approval by ID
@@ -35,7 +35,7 @@ export const GET = createApiHandler(
       return errorResponse('Approval not found', 404);
     }
 
-    if (!canViewSubmission(session, approval.bankId)) {
+    if (!canAccessInstitution(session, approval.bankId)) {
       return errorResponse('Access denied', 403);
     }
 

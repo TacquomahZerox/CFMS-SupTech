@@ -141,7 +141,7 @@ export default function CFMDashboard() {
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
-          <Link href="/approvals/new">
+          <Link href="/approvals">
             <Button>
               <FileCheck className="h-4 w-4 mr-2" />
               New Approval

@@ -32,8 +32,8 @@ export const GET = createApiHandler(
 
     if (search) {
       where.OR = [
-        { referenceNumber: { contains: search, mode: 'insensitive' } },
-        { beneficiaryName: { contains: search, mode: 'insensitive' } },
+        { referenceNumber: { contains: search } },
+        { beneficiaryName: { contains: search } },
       ];
     }
 

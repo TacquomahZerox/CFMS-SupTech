@@ -183,7 +183,7 @@ export const approvalBulkUploadSchema = z.array(z.object({
   validityStart: z.string(),
   validityEnd: z.string(),
   beneficiaryName: z.string().optional(),
-  bankCode: z.string(),
+  bankCode: z.string().optional(),
   conditions: z.string().optional(),
   beneficiaryAccount: z.string().optional(),
   purpose: z.string().optional(),
@@ -214,11 +214,14 @@ export const transactionCreateSchema = z.object({
   transactionDate: z.string().datetime().or(z.date()),
   valueDate: z.string().datetime().or(z.date()).optional(),
   counterpartyName: z.string().optional(),
+  counterpartyAccount: z.string().optional(),
   counterpartyCountry: z.string().optional(),
   purpose: z.string().optional(),
+  documentReference: z.string().optional(),
   bankId: z.string(),
   branchId: z.string().optional(),
   approvalId: z.string().optional(),
+  submissionId: z.string().optional(),
 });
 
 export const transactionBulkSchema = z.array(z.object({
@@ -230,8 +233,10 @@ export const transactionBulkSchema = z.array(z.object({
   transactionDate: z.string(),
   valueDate: z.string().optional(),
   counterpartyName: z.string().optional(),
+  counterpartyAccount: z.string().optional(),
   counterpartyCountry: z.string().optional(),
   purpose: z.string().optional(),
+  documentReference: z.string().optional(),
   branchCode: z.string().optional(),
   approvalReference: z.string().optional(),
 }));
